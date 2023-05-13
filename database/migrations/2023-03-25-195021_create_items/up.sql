@@ -1,0 +1,7 @@
+CREATE TABLE items (
+  id VARCHAR PRIMARY KEY NOT NULL,
+  collection VARCHAR NOT NULL,
+  option_name VARCHAR NOT NULL,
+  name VARCHAR NOT NULL,
+  last_price DOUBLE NOT NULL
+)
