@@ -12,7 +12,7 @@ pub async fn start_screening() -> Receiver<()> {
     let (tx, rx) = channel(1);
 
     task::spawn(async move {
-        let mut database = database::Database::new();
+        let database = database::Database::new().await;
 
         loop {
             let mut query = ItemsQuery {
@@ -21,13 +21,14 @@ pub async fn start_screening() -> Receiver<()> {
             };
 
             loop {
-                let items: Vec<database::models::Item> = match get_items_models(&query).await {
+                let items: Vec<database::market_item::Model> = match get_items_models(&query).await
+                {
                     Some(items) => items,
                     None => continue,
                 };
                 let items_len = items.len();
 
-                database.insert_items(items);
+                database.insert_items(items).await;
                 tx.send(()).await.expect("Channel broken");
 
                 time::sleep(time::Duration::from_secs(3)).await;
@@ -43,17 +44,16 @@ pub async fn start_screening() -> Receiver<()> {
     return rx;
 }
 
-async fn get_items_models(query: &ItemsQuery) -> Option<Vec<database::models::Item>> {
+async fn get_items_models(query: &ItemsQuery) -> Option<Vec<database::market_item::Model>> {
     let response = match requests::get_items(&query).await {
         Some(items) => items,
         None => return None,
     };
 
-    let items: Vec<database::models::Item> = response
+    let items: Vec<database::market_item::Model> = response
         .items
         .iter()
-        .map(|item| database::models::Item {
-            id: item.id.clone(),
+        .map(|item| database::market_item::Model {
             collection: item.metadata.collection.clone(),
             option_name: item.metadata.option_name.clone(),
             name: item.metadata.name.clone(),
