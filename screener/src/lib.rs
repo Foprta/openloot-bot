@@ -57,7 +57,7 @@ async fn get_items_models(query: &ItemsQuery) -> Option<Vec<database::market_ite
             collection: item.metadata.collection.clone(),
             option_name: item.metadata.option_name.clone(),
             name: item.metadata.name.clone(),
-            last_price: item.min_price as f64,
+            last_price: item.min_price,
         })
         .collect();
 

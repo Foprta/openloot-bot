@@ -11,7 +11,7 @@ pub struct ItemsResponse {
 #[serde(rename_all = "camelCase")]
 pub struct Item {
     pub metadata: ItemMetadata,
-    pub min_price: f32,
+    pub min_price: f64,
 }
 
 #[derive(Deserialize, Debug, Clone)]
