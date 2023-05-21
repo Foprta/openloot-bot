@@ -80,6 +80,10 @@ async fn send_notifications(bot: &Bot, db: &database::Database) {
             None => continue,
         };
 
+        if item_data.last_price > notification.0.price {
+            continue;
+        }
+
         let message = format!(
             "
 Current price: {}

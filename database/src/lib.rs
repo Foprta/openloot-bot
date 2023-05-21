@@ -15,8 +15,6 @@ impl Database {
     pub async fn new() -> Self {
         let database_url = dotenv::var("DATABASE_URL").expect("DATABASE_URL must be set");
 
-        println!("{}", database_url);
-
         let connection = sea_orm::Database::connect(database_url)
             .await
             .expect("Cound not connect to Database");

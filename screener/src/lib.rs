@@ -6,7 +6,7 @@ use requests::ItemsQuery;
 use tokio::sync::mpsc::{channel, Receiver};
 use tokio::{task, time};
 
-const PAGE_SIZE: u8 = 250;
+const PAGE_SIZE: u8 = 70;
 
 pub async fn start_screening() -> Receiver<()> {
     let (tx, rx) = channel(1);
@@ -32,7 +32,7 @@ pub async fn start_screening() -> Receiver<()> {
                 tx.send(()).await.expect("Channel broken");
 
                 time::sleep(time::Duration::from_secs(3)).await;
-                if items_len.lt(&250) {
+                if items_len.lt(&(PAGE_SIZE as usize)) {
                     break;
                 }
 
@@ -57,7 +57,7 @@ async fn get_items_models(query: &ItemsQuery) -> Option<Vec<database::market_ite
             collection: item.metadata.collection.clone(),
             option_name: item.metadata.option_name.clone(),
             name: item.metadata.name.clone(),
-            last_price: item.min_price,
+            last_price: item.min_price as f64,
         })
         .collect();
 

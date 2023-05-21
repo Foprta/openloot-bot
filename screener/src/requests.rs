@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json;
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -9,9 +10,8 @@ pub struct ItemsResponse {
 #[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Item {
-    pub id: String,
     pub metadata: ItemMetadata,
-    pub min_price: f64,
+    pub min_price: f32,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -46,15 +46,20 @@ pub async fn get_items(query: &ItemsQuery) -> Option<ItemsResponse> {
         }
     };
 
-    let response_body = format!("Response: {:?}", &res);
+    let res = match res.text().await {
+        Ok(data) => data,
+        Err(e) => {
+            eprintln!("Error reading response: {}", e);
+            return None;
+        }
+    };
 
-    let data: ItemsResponse = match res.json().await {
+    println!("{}", res.len());
+
+    let data: ItemsResponse = match serde_json::from_str(&res) {
         Ok(result) => result,
         Err(err) => {
-            eprintln!(
-                "Error parsing ItemsResponse: {}\nResponse was: {}",
-                err, response_body
-            );
+            eprintln!("Error parsing ItemsResponse: {}", err);
             return None;
         }
     };
