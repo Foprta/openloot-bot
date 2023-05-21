@@ -35,7 +35,7 @@ pub async fn get_items(query: &ItemsQuery) -> Option<ItemsResponse> {
     let client = reqwest::Client::new();
 
     let req = client
-        .get("https://openloot.com/api/v2/market/listings?sort=name%3Adesc&onSale=true")
+        .get("http://openloot.com/api/v2/market/listings?sort=name%3Adesc&onSale=true")
         .query(query);
 
     let res = match req.send().await {
