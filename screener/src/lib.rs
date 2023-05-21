@@ -6,7 +6,7 @@ use requests::ItemsQuery;
 use tokio::sync::mpsc::{channel, Receiver};
 use tokio::{task, time};
 
-const PAGE_SIZE: u8 = 70;
+const PAGE_SIZE: u8 = 250;
 
 pub async fn start_screening() -> Receiver<()> {
     let (tx, rx) = channel(1);
