@@ -1950,6 +1950,7 @@ name = "screener"
 version = "0.1.0"
 dependencies = [
  "database",
+ "dotenv",
  "reqwest",
  "serde",
  "serde_json",

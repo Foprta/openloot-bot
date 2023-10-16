@@ -23,15 +23,14 @@ Also these commands are supported:
 enum Command {
     #[command(description = "display this text")]
     Help,
-
-    #[command(description = "show all my subscriptions")]
-    ShowItems,
-
-    #[command(description = "remove some subscriptions")]
-    RemoveItems,
-
-    #[command(description = "remove all subscriptions")]
-    Clear,
+    //    #[command(description = "show all my subscriptions")]
+    //    ShowItems,
+    //
+    //    #[command(description = "remove some subscriptions")]
+    //    RemoveItems,
+    //
+    //    #[command(description = "remove all subscriptions")]
+    //    Clear,
 }
 
 lazy_static! {
@@ -97,14 +96,14 @@ https://openloot.com/items/{}/{}
             item_data.option_name
         );
 
-        if let Ok(_) = bot
+        match bot
             .send_message(notification.0.chat_id.clone(), message)
             .await
         {
-            let mut updated_notification = notification.0.clone();
-            updated_notification.notificate = false;
-
-            sent_notifications.push(updated_notification)
+            Ok(_) => {}
+            Err(err) => {
+                eprintln!("{}", err);
+            }
         }
     }
 
@@ -112,7 +111,7 @@ https://openloot.com/items/{}/{}
 }
 
 async fn answer(bot: Bot, msg: Message, db: &database::Database) -> Result<(), RequestError> {
-    let item_regex: Regex = Regex::new(r"^([A-Za-z_]+) (\d+(?:\.\d+)?)$").unwrap();
+    let item_regex: Regex = Regex::new(r"^([A-Za-z0-9_]+) (\d+(?:\.\d+)?)$").unwrap();
 
     let msg_text = match msg.text() {
         Some(text) => text,
@@ -166,11 +165,13 @@ async fn answer(bot: Bot, msg: Message, db: &database::Database) -> Result<(), R
                 }
             }
 
+            let answer: String;
             if subscriptions.len().gt(&0) {
+                answer = String::from("Done");
                 db.insert_subscriptions(subscriptions).await;
+            } else {
+                answer = String::from("Cannot parse your message");
             }
-
-            let answer: String = String::from("Done");
 
             bot.send_message(msg.chat.id, answer).await
         }

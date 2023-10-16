@@ -34,9 +34,9 @@ pub async fn get_items(query: &ItemsQuery) -> Option<ItemsResponse> {
 
     let client = reqwest::Client::new();
 
-    let req = client
-        .get("http://openloot.com/api/v2/market/listings?sort=name%3Adesc&onSale=true")
-        .query(query);
+    let url = format!("https://proxy.scrapeops.io/v1/?api_key={}&url=https%3A%2F%2Fapi.openloot.com%2Fv2%2Fmarket%2Flistings%3FgameId%3D56a149cf-f146-487a-8a1c-58dc9ff3a15c%26onSale%3Dtrue%26page%3D{}%26pageSize%3D{}%26sort%3Dname%253Aasc&country=us&device_type=desktop&premium=true", dotenv::var("PROXY_API_KEY").expect("PROXY_API_KEY must be set"), query.page, query.page_size);
+
+    let req = client.get(url);
 
     let res = match req.send().await {
         Ok(result) => result,
