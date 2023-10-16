@@ -3,4 +3,5 @@
 pub mod prelude;
 
 pub mod market_item;
+pub mod rental_subscription;
 pub mod subscription;

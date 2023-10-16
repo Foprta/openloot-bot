@@ -4,7 +4,7 @@ use dotenv;
 use sea_orm::*;
 
 use entities::prelude::*;
-pub use entities::{market_item, subscription};
+pub use entities::rental_subscription;
 
 #[derive(Clone)]
 pub struct Database {
@@ -22,57 +22,27 @@ impl Database {
         Database { connection }
     }
 
-    pub async fn insert_items(&self, items: Vec<market_item::Model>) {
-        if items.len().eq(&0) {
-            return;
-        }
-
-        let active_models: Vec<market_item::ActiveModel> = items
-            .iter()
-            .cloned()
-            .map(|model| model.into_active_model())
-            .collect();
-
-        let result = MarketItem::insert_many(active_models)
-            .on_conflict(
-                sea_query::OnConflict::columns([
-                    market_item::Column::Collection,
-                    market_item::Column::OptionName,
-                ])
-                .update_column(market_item::Column::LastPrice)
-                .to_owned(),
-            )
-            .exec(&self.connection)
-            .await;
-
-        match result {
-            Ok(_) => {}
-            Err(err) => {
-                eprintln!("Error inserting Items: {}", err);
-            }
-        }
-    }
-
-    pub async fn insert_subscriptions(&self, subscriptions: Vec<subscription::Model>) {
+    pub async fn insert_subscriptions(&self, subscriptions: Vec<rental_subscription::Model>) {
         if subscriptions.len().eq(&0) {
             return;
         }
 
-        let active_models: Vec<subscription::ActiveModel> = subscriptions
+        let active_models: Vec<rental_subscription::ActiveModel> = subscriptions
             .iter()
             .cloned()
             .map(|model| model.into_active_model())
             .collect();
 
-        let result = Subscription::insert_many(active_models)
+        let result = RentalSubscription::insert_many(active_models)
             .on_conflict(
                 sea_query::OnConflict::columns([
-                    subscription::Column::ChatId,
-                    subscription::Column::ItemName,
+                    rental_subscription::Column::ChatId,
+                    rental_subscription::Column::ItemName,
+                    rental_subscription::Column::ItemCollection,
                 ])
                 .update_columns([
-                    subscription::Column::Price,
-                    subscription::Column::Notificate,
+                    rental_subscription::Column::Price,
+                    rental_subscription::Column::Notificate,
                 ])
                 .to_owned(),
             )
@@ -82,17 +52,18 @@ impl Database {
         match result {
             Ok(_) => {}
             Err(err) => {
-                eprintln!("Error inserting Subscriptions: {}", err);
+                eprintln!("Error inserting Rental Subscriptions: {}", err);
             }
         }
     }
 
-    pub async fn get_subscriptions_to_notificate(&self) -> Vec<(subscription::Model, Option<market_item::Model>)> {
-        let result = Subscription::find()
-            .filter(subscription::Column::Notificate.eq(true))
-            .find_also_related(market_item::Entity)
-            .all(&self.connection).await.unwrap();
-        
+    pub async fn get_subscriptions_to_notificate(&self) -> Vec<rental_subscription::Model> {
+        let result = RentalSubscription::find()
+            .filter(rental_subscription::Column::Notificate.eq(true))
+            .all(&self.connection)
+            .await
+            .unwrap();
+
         return result;
     }
 }

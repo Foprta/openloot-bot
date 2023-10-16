@@ -10,12 +10,12 @@ use teloxide::{prelude::*, types::ParseMode, utils::command::BotCommands, Reques
 #[command(
     rename_rule = "lowercase",
     description = "
-To subscribe to price drops, you need to send messages in the format similar to example. To add *multiple* items at once divide them by newline.
+To subscribe to rental price drops, you need to send messages in the format similar to example. To add *multiple* items at once divide them by newline.
 
 Example:
-*gold_pass_0 4000*
-*StygianMenace_Head 100.6*
-*MysteryBox_EarlyAccess_TimeWarden 1550.7*
+*rent 'Lunar Time Warden' 10*
+*rent 'Shrouded Armory' 2*
+*rent 'Bug Buster' 10*
 
 Also these commands are supported:
     "
@@ -23,15 +23,6 @@ Also these commands are supported:
 enum Command {
     #[command(description = "display this text")]
     Help,
-
-    #[command(description = "show all my subscriptions")]
-    ShowItems,
-
-    #[command(description = "remove some subscriptions")]
-    RemoveItems,
-
-    #[command(description = "remove all subscriptions")]
-    Clear,
 }
 
 lazy_static! {
@@ -53,9 +44,26 @@ async fn main() {
 
         async move {
             loop {
-                rx.recv().await.unwrap();
+                if let Some(data) = rx.recv().await {
+                    let message = format!(
+                        "
+{}
 
-                send_notifications(&bot, &db).await;
+Current price: {}
+Wanted price: {}
+
+https://openloot.com/marketplace/rentals/{}
+            ",
+                        data.subscription.item_name,
+                        data.price,
+                        data.subscription.price,
+                        data.item_id
+                    );
+
+                    bot.send_message(data.subscription.chat_id, message)
+                        .await
+                        .expect("Cannt send message");
+                };
             }
         }
     });
@@ -69,50 +77,8 @@ async fn main() {
     .await;
 }
 
-async fn send_notifications(bot: &Bot, db: &database::Database) {
-    let notifications = db.get_subscriptions_to_notificate().await;
-
-    let mut sent_notifications: Vec<database::subscription::Model> = Vec::new();
-
-    for notification in notifications.iter() {
-        let item_data = match notification.1.clone() {
-            Some(data) => data,
-            None => continue,
-        };
-
-        if item_data.last_price > notification.0.price {
-            continue;
-        }
-
-        let message = format!(
-            "
-Current price: {}
-Wanted price: {}
-
-https://openloot.com/items/{}/{}
-            ",
-            item_data.last_price,
-            notification.0.price.clone(),
-            item_data.collection,
-            item_data.option_name
-        );
-
-        if let Ok(_) = bot
-            .send_message(notification.0.chat_id.clone(), message)
-            .await
-        {
-            let mut updated_notification = notification.0.clone();
-            updated_notification.notificate = false;
-
-            sent_notifications.push(updated_notification)
-        }
-    }
-
-    db.insert_subscriptions(sent_notifications).await;
-}
-
 async fn answer(bot: Bot, msg: Message, db: &database::Database) -> Result<(), RequestError> {
-    let item_regex: Regex = Regex::new(r"^([A-Za-z_]+) (\d+(?:\.\d+)?)$").unwrap();
+    let item_regex: Regex = Regex::new(r"^rent '(.*)' (\d+(?:\.\d+)?)$").unwrap();
 
     let msg_text = match msg.text() {
         Some(text) => text,
@@ -121,7 +87,7 @@ async fn answer(bot: Bot, msg: Message, db: &database::Database) -> Result<(), R
         }
     };
 
-    let command = Command::parse(msg_text, "openloot_screener_bot");
+    let command = Command::parse(msg_text, "openloot_test_bot");
 
     let sended_message = match command {
         Ok(command) => match command {
@@ -138,7 +104,7 @@ async fn answer(bot: Bot, msg: Message, db: &database::Database) -> Result<(), R
                 .map(|line| line.trim().to_string())
                 .collect();
 
-            let mut subscriptions: Vec<database::subscription::Model> = Vec::new();
+            let mut subscriptions: Vec<database::rental_subscription::Model> = Vec::new();
 
             for line in message_lines.iter() {
                 let mut parsed_item = item_regex.captures_iter(line);
@@ -152,7 +118,7 @@ async fn answer(bot: Bot, msg: Message, db: &database::Database) -> Result<(), R
                             }
                         };
 
-                        let subscription = database::subscription::Model {
+                        let subscription = database::rental_subscription::Model {
                             chat_id: msg.chat.id.to_string(),
                             price,
                             item_collection: "BT0".to_string(),

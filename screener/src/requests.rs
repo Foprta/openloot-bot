@@ -1,5 +1,7 @@
-use serde::{Deserialize, Serialize};
+use curl::easy::Easy;
+use serde::Deserialize;
 use serde_json;
+use urlencoding::encode;
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -10,8 +12,15 @@ pub struct ItemsResponse {
 #[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Item {
+    pub content: Vec<ContentItem>,
+    pub price: String,
+    pub id: String,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ContentItem {
     pub metadata: ItemMetadata,
-    pub min_price: f64,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -22,45 +31,40 @@ pub struct ItemMetadata {
     pub option_name: String,
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ItemsQuery {
-    pub page: u16,
-    pub page_size: u8,
-}
+pub async fn get_rental(query: &String) -> Option<ItemsResponse> {
+    println!("Getting rentals for '{}'", query);
 
-pub async fn get_items(query: &ItemsQuery) -> Option<ItemsResponse> {
-    println!("Getting items on page {}", query.page);
+    let mut json = Vec::new();
 
-    let client = reqwest::Client::new();
+    let mut easy = Easy::new();
+    easy.proxy_username(&dotenv::var("PROXY_USER").expect("PROXY_USER must be set")).unwrap();
+    easy.proxy_password(&dotenv::var("PROXY_PASSWORD").expect("PROXY_PASSWORD must be set")).unwrap();
+    easy.proxy(&dotenv::var("PROXY_URL").expect("PROXY_URL must be set")).unwrap();
+    easy.useragent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36").unwrap();
+    easy.proxy_port(10000).unwrap();
+    easy.get(true).unwrap();
 
-    let req = client
-        .get("http://openloot.com/api/v2/market/listings?sort=name%3Adesc&onSale=true")
-        .query(query);
+    let encoded_query = encode(query);
+    easy.url(&format!("https://api.openloot.com/v2/market/rentals?gameId=56a149cf-f146-487a-8a1c-58dc9ff3a15c&page=1&pageSize=100&sort=price%3Aasc&q={}", encoded_query)).unwrap();
 
-    let res = match req.send().await {
-        Ok(result) => result,
-        Err(err) => {
-            eprintln!("Error getting items: {}", err);
-            return None;
-        }
-    };
+    {
+        let mut transfer = easy.transfer();
+        transfer
+            .write_function(|data| {
+                json.extend_from_slice(data);
+                Ok(data.len())
+            })
+            .unwrap();
+        transfer.perform().unwrap();
+    }
 
-    let res = match res.text().await {
-        Ok(data) => data,
-        Err(e) => {
-            eprintln!("Error reading response: {}", e);
-            return None;
-        }
-    };
-
-    let data: ItemsResponse = match serde_json::from_str(&res) {
-        Ok(result) => result,
+    let result: ItemsResponse = match serde_json::from_slice(&json) {
+        Ok(res) => res,
         Err(err) => {
             eprintln!("Error parsing ItemsResponse: {}", err);
             return None;
         }
     };
 
-    return Some(data);
+    return Some(result);
 }
