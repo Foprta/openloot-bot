@@ -13,6 +13,8 @@ pub struct Model {
     #[sea_orm(column_type = "Double")]
     pub price: f64,
     pub notificate: bool,
+    #[sea_orm(column_type = "Double", nullable)]
+    pub last_notified_price: Option<f64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

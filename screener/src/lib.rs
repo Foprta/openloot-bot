@@ -1,47 +1,47 @@
 mod requests;
 
+use tokio::sync::mpsc::Sender;
+
 use database;
 
 use requests::ItemsQuery;
 use tokio::sync::mpsc::{channel, Receiver};
-use tokio::{task, time};
+use tokio::task;
 
 const PAGE_SIZE: u8 = 250;
 
 pub async fn start_screening() -> Receiver<()> {
     let (tx, rx) = channel(1);
 
+    let tx_clone = tx.clone();
+    start_page_parsing(1, tx_clone);
+    let tx_clone = tx.clone();
+    start_page_parsing(2, tx_clone);
+    let tx_clone = tx.clone();
+    start_page_parsing(3, tx_clone);
+
+    return rx;
+}
+
+fn start_page_parsing(page_size: u16, tx: Sender<()>) {
     task::spawn(async move {
         let database = database::Database::new().await;
 
+        let query = ItemsQuery {
+            page: page_size,
+            page_size: PAGE_SIZE,
+        };
+
         loop {
-            let mut query = ItemsQuery {
-                page: 1,
-                page_size: PAGE_SIZE,
+            let items: Vec<database::market_item::Model> = match get_items_models(&query).await {
+                Some(items) => items,
+                None => continue,
             };
 
-            loop {
-                let items: Vec<database::market_item::Model> = match get_items_models(&query).await
-                {
-                    Some(items) => items,
-                    None => continue,
-                };
-                let items_len = items.len();
-
-                database.insert_items(items).await;
-                tx.send(()).await.expect("Channel broken");
-
-                time::sleep(time::Duration::from_secs(3)).await;
-                if items_len.lt(&(PAGE_SIZE as usize)) {
-                    break;
-                }
-
-                query.page += 1;
-            }
+            database.insert_items(items).await;
+            tx.send(()).await.expect("Channel broken");
         }
     });
-
-    return rx;
 }
 
 async fn get_items_models(query: &ItemsQuery) -> Option<Vec<database::market_item::Model>> {

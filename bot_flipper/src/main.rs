@@ -1,6 +1,8 @@
-use database;
-use screener;
+use std::collections::HashMap;
 
+use database::{self, subscription};
+
+use std::sync::Arc;
 use async_once::AsyncOnce;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -10,14 +12,8 @@ use teloxide::{prelude::*, types::ParseMode, utils::command::BotCommands, Reques
 #[command(
     rename_rule = "lowercase",
     description = "
-To subscribe to price drops, you need to send messages in the format similar to example. To add *multiple* items at once divide them by newline.
-
-Example:
-*gold_pass_0 4000*
-*StygianMenace_Head 100.6*
-*MysteryBox_EarlyAccess_TimeWarden 1550.7*
-
-Also these commands are supported:
+percent min_profit
+30      100
     "
 )]
 enum Command {
@@ -38,61 +34,61 @@ lazy_static! {
         AsyncOnce::new(async { database::Database::new().await });
 }
 
+struct UserSubscription {
+    chat_id: String,
+    percent_drop: f64,
+    minimum_profit: f64,
+}
+
 #[tokio::main]
 async fn main() {
     dotenv::dotenv().expect("Unable to parse ENV");
-    let bot = Bot::new(
-        dotenv::var("TELOXIDE_TOKEN_SCREENER").expect("TELOXIDE_TOKEN_SCREENER must be set"),
-    );
+    let bot = Bot::new(dotenv::var("TELOXIDE_TOKEN_FLIPPER").expect("TELOXIDE_TOKEN_FLIPPER must be set"));
+    let subscriptions: Arc<Vec<UserSubscription>> = Arc::new(Vec::new());
 
-    let mut rx = screener::start_screening().await;
+    let subscriptions_clone = Arc::clone(&subscriptions);
+    tokio::task::spawn(async move {
+        let mut average_prices: HashMap<&str, f64> = HashMap::new();
 
-    // Notifier
-    tokio::task::spawn({
         let db = DATABASE.get().await;
 
-        let bot = bot.clone();
+        for item in db.get_market_items().await.iter() {
+            let item_average_price = average_prices.entry(&item.option_name).or_insert(item.last_price);
 
-        async move {
-            loop {
-                rx.recv().await.unwrap();
+            for subscription in subscriptions_clone.iter() {
+                let minimum_profit = *item_average_price - item.last_price;
+                let percent_drop = &100.0 * item.last_price / *item_average_price;
 
-                send_notifications(&bot, &db).await;
+                if (minimum_profit >= subscription.minimum_profit) & (percent_drop >= subscription.percent_drop) {
+                    println!("{} {} {} {}", minimum_profit,subscription.minimum_profit,percent_drop,subscription.percent_drop );
+                }
             }
         }
+        
+        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
     });
 
     // Reciever
-    teloxide::repl(bot, |bot: Bot, msg: Message| async {
+    teloxide::repl(bot, |bot: Bot, msg: Message| async move {
         let db = DATABASE.get().await;
 
-        answer(bot, msg, db).await
+        answer(bot, msg, *subscriptions).await
     })
     .await;
 }
 
-async fn send_notifications(bot: &Bot, db: &database::Database) {
+async fn send_notifications(bot: &Bot, subscriptions: Vec<UserSubscription>) {
     let notifications = db.get_subscriptions_to_notificate().await;
 
     let mut sent_notifications: Vec<database::subscription::Model> = Vec::new();
 
     for notification in notifications.iter() {
-        let mut updated_notification = notification.0.clone();
-
         let item_data = match notification.1.clone() {
             Some(data) => data,
             None => continue,
         };
 
-        if let Some(last_notified_price) = notification.0.last_notified_price {
-            if item_data.last_price.eq(&last_notified_price) {
-                continue;
-            }
-        }
-
         if item_data.last_price > notification.0.price {
-            updated_notification.last_notified_price = None;
-            sent_notifications.push(updated_notification);
             continue;
         }
 
@@ -113,10 +109,7 @@ https://openloot.com/items/{}/{}
             .send_message(notification.0.chat_id.clone(), message)
             .await
         {
-            Ok(_) => {
-                updated_notification.last_notified_price = Some(item_data.last_price);
-                sent_notifications.push(updated_notification);
-            },
+            Ok(_) => {}
             Err(err) => {
                 eprintln!("{}", err);
             }
@@ -127,7 +120,7 @@ https://openloot.com/items/{}/{}
 }
 
 async fn answer(bot: Bot, msg: Message, db: &database::Database) -> Result<(), RequestError> {
-    let item_regex: Regex = Regex::new(r"^([A-Za-z0-9_]+) (\d+(?:\.\d+)?)$").unwrap();
+    let item_regex: Regex = Regex::new(r"^(\d+(?:\.\d+)?) (\d+(?:\.\d+)?)$").unwrap();
 
     let msg_text = match msg.text() {
         Some(text) => text,
@@ -136,7 +129,7 @@ async fn answer(bot: Bot, msg: Message, db: &database::Database) -> Result<(), R
         }
     };
 
-    let command = Command::parse(msg_text, "openloot_screener_bot");
+    let command = Command::parse(msg_text, "openloot_flipper_bot");
 
     let sended_message = match command {
         Ok(command) => match command {
@@ -173,7 +166,6 @@ async fn answer(bot: Bot, msg: Message, db: &database::Database) -> Result<(), R
                             item_collection: "BT0".to_string(),
                             item_name: item[1].to_string(),
                             notificate: true,
-                            last_notified_price: None,
                         };
 
                         subscriptions.push(subscription);

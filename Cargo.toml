@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "bot",
+    "bot_flipper",
     "screener",
     "database",
     "database/migration"

@@ -73,6 +73,7 @@ impl Database {
                 .update_columns([
                     subscription::Column::Price,
                     subscription::Column::Notificate,
+                    subscription::Column::LastNotifiedPrice
                 ])
                 .to_owned(),
             )
@@ -87,12 +88,22 @@ impl Database {
         }
     }
 
-    pub async fn get_subscriptions_to_notificate(&self) -> Vec<(subscription::Model, Option<market_item::Model>)> {
+    pub async fn get_subscriptions_to_notificate(
+        &self,
+    ) -> Vec<(subscription::Model, Option<market_item::Model>)> {
         let result = Subscription::find()
             .filter(subscription::Column::Notificate.eq(true))
             .find_also_related(market_item::Entity)
-            .all(&self.connection).await.unwrap();
-        
+            .all(&self.connection)
+            .await
+            .unwrap();
+
+        return result;
+    }
+
+    pub async fn get_market_items(&self) -> Vec<market_item::Model> {
+        let result = MarketItem::find().all(&self.connection).await.unwrap();
+
         return result;
     }
 }
