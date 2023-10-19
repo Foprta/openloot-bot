@@ -14,9 +14,7 @@ use teloxide::{prelude::*, types::ParseMode, utils::command::BotCommands, Reques
 #[command(
     rename_rule = "lowercase",
     description = "
-min_percent_drop min_profit
-30               100
-    "
+My name is Jeff"
 )]
 enum Command {
     #[command(description = "display this text")]
@@ -179,6 +177,9 @@ async fn answer(
     let sended_message = match command {
         Ok(command) => match command {
             Command::Help => {
+                println!("{} {}", msg.chat.id, Command::descriptions().to_string());
+
+
                 bot.send_message(msg.chat.id, Command::descriptions().to_string())
                     .parse_mode(ParseMode::Markdown)
                     .await
@@ -225,12 +226,14 @@ async fn answer(
                 }
             }
 
+            println!("{} {}", msg.chat.id, answer);
+
             bot.send_message(msg.chat.id, answer).await
         }
     };
 
     match sended_message {
-        Err(err) => eprintln!("Error sending message: {}", err),
+        Err(err) => eprintln!("Error sending answer: {}", err),
         _ => {}
     }
 
