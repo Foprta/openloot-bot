@@ -1,8 +1,10 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
-use database::{self, subscription};
+use database;
 
-use std::sync::Arc;
 use async_once::AsyncOnce;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -12,8 +14,8 @@ use teloxide::{prelude::*, types::ParseMode, utils::command::BotCommands, Reques
 #[command(
     rename_rule = "lowercase",
     description = "
-percent min_profit
-30      100
+min_percent_drop min_profit
+30               100
     "
 )]
 enum Command {
@@ -35,91 +37,134 @@ lazy_static! {
 }
 
 struct UserSubscription {
-    chat_id: String,
-    percent_drop: f64,
+    minimum_percent_drop: f64,
     minimum_profit: f64,
+}
+
+struct Notification {
+    chat_id: String,
+    message: String,
 }
 
 #[tokio::main]
 async fn main() {
     dotenv::dotenv().expect("Unable to parse ENV");
-    let bot = Bot::new(dotenv::var("TELOXIDE_TOKEN_FLIPPER").expect("TELOXIDE_TOKEN_FLIPPER must be set"));
-    let subscriptions: Arc<Vec<UserSubscription>> = Arc::new(Vec::new());
+    let bot = Bot::new(
+        dotenv::var("TELOXIDE_TOKEN_FLIPPER").expect("TELOXIDE_TOKEN_FLIPPER must be set"),
+    );
+    let subscriptions = Arc::new(Mutex::new(HashMap::<String, UserSubscription>::new()));
 
-    let subscriptions_clone = Arc::clone(&subscriptions);
-    tokio::task::spawn(async move {
-        let mut average_prices: HashMap<&str, f64> = HashMap::new();
+    tokio::task::spawn({
+        let mut average_prices: HashMap<String, f64> = HashMap::new();
+        let mut last_notified_prices: HashMap<String, HashMap<String, f64>> = HashMap::new();
+        let subscriptions_cloned = Arc::clone(&subscriptions);
+        let bot = bot.clone();
 
-        let db = DATABASE.get().await;
+        async move {
+            let db = DATABASE.get().await;
 
-        for item in db.get_market_items().await.iter() {
-            let item_average_price = average_prices.entry(&item.option_name).or_insert(item.last_price);
+            loop {
+                let market_items = db.get_market_items().await;
+                let mut notifications: Vec<Notification> = Vec::new();
 
-            for subscription in subscriptions_clone.iter() {
-                let minimum_profit = *item_average_price - item.last_price;
-                let percent_drop = &100.0 * item.last_price / *item_average_price;
+                for item in market_items.iter() {
+                    let item_average_price = average_prices
+                        .get(&item.option_name)
+                        .unwrap_or(&item.last_price);
 
-                if (minimum_profit >= subscription.minimum_profit) & (percent_drop >= subscription.percent_drop) {
-                    println!("{} {} {} {}", minimum_profit,subscription.minimum_profit,percent_drop,subscription.percent_drop );
-                }
-            }
-        }
-        
-        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-    });
+                    let subscriptions_cloned = subscriptions_cloned.lock().unwrap();
 
-    // Reciever
-    teloxide::repl(bot, |bot: Bot, msg: Message| async move {
-        let db = DATABASE.get().await;
+                    for (subscription_chat_id, subscription) in subscriptions_cloned.iter() {
+                        let profit = item_average_price - item.last_price;
+                        let percent_drop = &100.0 * (1.0 - item.last_price / item_average_price);
 
-        answer(bot, msg, *subscriptions).await
-    })
-    .await;
-}
+                        let already_notified = {
+                            if let Some(chat_notifications) =
+                                last_notified_prices.get(subscription_chat_id)
+                            {
+                                if let Some(last_notified_price) =
+                                    chat_notifications.get(&item.option_name)
+                                {
+                                    last_notified_price.eq(&item.last_price)
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            }
+                        };
 
-async fn send_notifications(bot: &Bot, subscriptions: Vec<UserSubscription>) {
-    let notifications = db.get_subscriptions_to_notificate().await;
-
-    let mut sent_notifications: Vec<database::subscription::Model> = Vec::new();
-
-    for notification in notifications.iter() {
-        let item_data = match notification.1.clone() {
-            Some(data) => data,
-            None => continue,
-        };
-
-        if item_data.last_price > notification.0.price {
-            continue;
-        }
-
-        let message = format!(
-            "
+                        if (profit >= subscription.minimum_profit)
+                            & (percent_drop >= subscription.minimum_percent_drop)
+                        {
+                            if already_notified.eq(&false) {
+                                let message = format!(
+                                    "
 Current price: {}
 Wanted price: {}
 
 https://openloot.com/items/{}/{}
             ",
-            item_data.last_price,
-            notification.0.price.clone(),
-            item_data.collection,
-            item_data.option_name
-        );
+                                    item.last_price,
+                                    item_average_price,
+                                    item.collection,
+                                    item.option_name
+                                );
 
-        match bot
-            .send_message(notification.0.chat_id.clone(), message)
-            .await
-        {
-            Ok(_) => {}
-            Err(err) => {
-                eprintln!("{}", err);
+                                notifications.push(Notification {
+                                    chat_id: subscription_chat_id.clone(),
+                                    message,
+                                });
+
+                                if let Some(chat_notifications) =
+                                    last_notified_prices.get_mut(subscription_chat_id)
+                                {
+                                    chat_notifications.insert(item.option_name.clone(), item.last_price);
+                                } else {
+                                    let mut chat_notifications = HashMap::new();
+                                    chat_notifications.insert(item.option_name.clone(), item.last_price);
+                                    last_notified_prices.insert(subscription_chat_id.clone(), chat_notifications);
+                                }
+                            }
+                        } else if let Some(chat_notifications) =
+                            last_notified_prices.get_mut(subscription_chat_id)
+                        {
+                            chat_notifications.remove(&item.option_name);
+                        }
+                    }
+
+                    let new_average_price =
+                        item_average_price + (item.last_price - item_average_price) / 5000.0;
+                    average_prices.insert(item.option_name.to_string(), new_average_price);
+                }
+
+                for notification in notifications {
+                    if let Err(err) = bot
+                        .send_message(notification.chat_id, notification.message)
+                        .await
+                    {
+                        eprintln!("Error sending mesage: {}", err);
+                    }
+                }
+
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
             }
         }
-    }
+    });
 
-    db.insert_subscriptions(sent_notifications).await;
+    // Receiver
+    teloxide::repl(bot, move |bot: Bot, msg: Message| {
+        let subscriptions = Arc::clone(&subscriptions);
+        async move { answer(bot, msg, subscriptions).await }
+    })
+    .await;
 }
 
-async fn answer(bot: Bot, msg: Message, db: &database::Database) -> Result<(), RequestError> {
+async fn answer(
+    bot: Bot,
+    msg: Message,
+    subscriptions: Arc<Mutex<HashMap<String, UserSubscription>>>,
+) -> Result<(), RequestError> {
     let item_regex: Regex = Regex::new(r"^(\d+(?:\.\d+)?) (\d+(?:\.\d+)?)$").unwrap();
 
     let msg_text = match msg.text() {
@@ -138,7 +183,6 @@ async fn answer(bot: Bot, msg: Message, db: &database::Database) -> Result<(), R
                     .parse_mode(ParseMode::Markdown)
                     .await
             }
-            _ => bot.send_dice(msg.chat.id).await,
         },
         Err(_) => {
             let message_lines: Vec<String> = msg_text
@@ -146,40 +190,39 @@ async fn answer(bot: Bot, msg: Message, db: &database::Database) -> Result<(), R
                 .map(|line| line.trim().to_string())
                 .collect();
 
-            let mut subscriptions: Vec<database::subscription::Model> = Vec::new();
+            let mut answer = String::from("Done");
 
             for line in message_lines.iter() {
                 let mut parsed_item = item_regex.captures_iter(line);
 
                 match parsed_item.next() {
                     Some(item) => {
-                        let price: f64 = match item[2].parse() {
+                        let min_percent_drop: f64 = match item[1].parse() {
                             Ok(res) => res,
                             Err(_) => {
+                                answer = String::from("Cannot parse your message");
                                 break;
                             }
                         };
 
-                        let subscription = database::subscription::Model {
-                            chat_id: msg.chat.id.to_string(),
-                            price,
-                            item_collection: "BT0".to_string(),
-                            item_name: item[1].to_string(),
-                            notificate: true,
+                        let min_price_drop: f64 = match item[2].parse() {
+                            Ok(res) => res,
+                            Err(_) => {
+                                answer = String::from("Cannot parse your message");
+                                break;
+                            }
                         };
 
-                        subscriptions.push(subscription);
+                        subscriptions.lock().unwrap().insert(
+                            msg.chat.id.to_string(),
+                            UserSubscription {
+                                minimum_percent_drop: min_percent_drop,
+                                minimum_profit: min_price_drop,
+                            },
+                        );
                     }
                     None => {}
                 }
-            }
-
-            let answer: String;
-            if subscriptions.len().gt(&0) {
-                answer = String::from("Done");
-                db.insert_subscriptions(subscriptions).await;
-            } else {
-                answer = String::from("Cannot parse your message");
             }
 
             bot.send_message(msg.chat.id, answer).await
