@@ -40,6 +40,8 @@ fn start_page_parsing(page_size: u16, tx: Sender<()>) {
 
             database.insert_items(items).await;
             tx.send(()).await.expect("Channel broken");
+
+            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
         }
     });
 }
